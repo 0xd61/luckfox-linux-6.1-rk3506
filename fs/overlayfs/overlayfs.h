@@ -683,6 +683,9 @@ int ovl_fileattr_get(struct dentry *dentry, struct fileattr *fa);
 int ovl_fileattr_set(struct user_namespace *mnt_userns,
 		     struct dentry *dentry, struct fileattr *fa);
 
+/* ioctl.c */
+long ovl_ioctl(struct file *file, unsigned int cmd, unsigned long arg);
+
 /* copy_up.c */
 int ovl_copy_up(struct dentry *dentry);
 int ovl_copy_up_with_data(struct dentry *dentry);
