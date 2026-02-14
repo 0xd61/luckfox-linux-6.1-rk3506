@@ -200,7 +200,7 @@ static int ovl_ioctl_validate_and_copy_path(__u64 path_ptr, __u32 path_len,
 		return -EINVAL;
 
 	/* Validate path length (strlen, not including null terminator) */
-	if (path_len == 0 || path_len >= PATH_MAX)
+	if (path_len == 0 || path_len >= (__u32)PATH_MAX)
 		return -EINVAL;
 
 	/* Allocate buffer for the path string plus null terminator */
