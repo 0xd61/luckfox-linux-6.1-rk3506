@@ -419,6 +419,9 @@ enum dwc2_ep0_state {
  *                      back to DWC2_SPEED_PARAM_HIGH while device is gone.
  *			0 - No (default)
  *			1 - Yes
+ * @vbus_always_on:	VBUS is tied to system 5V (diode-OR). Session-end never
+ *			arrives; the gadget uses a SOF-frame watchdog for unplug.
+ *			USB suspend looks like unplug.
  * @service_interval:   Enable service interval based scheduling.
  *                      0 - No
  *                      1 - Yes
@@ -499,6 +502,7 @@ struct dwc2_core_params {
 	u32 g_tx_fifo_size[MAX_EPS_CHANNELS];
 
 	bool change_speed_quirk;
+	bool vbus_always_on;
 };
 
 /**
@@ -1210,6 +1214,8 @@ struct dwc2_hsotg {
 	unsigned int enabled:1;
 	unsigned int connected:1;
 	unsigned int remote_wakeup_allowed:1;
+	struct delayed_work sof_watchdog;
+	u32 sof_watchdog_frameno;
 	struct dwc2_hsotg_ep *eps_in[MAX_EPS_CHANNELS];
 	struct dwc2_hsotg_ep *eps_out[MAX_EPS_CHANNELS];
 #endif /* CONFIG_USB_DWC2_PERIPHERAL || CONFIG_USB_DWC2_DUAL_ROLE */

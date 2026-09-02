@@ -24,6 +24,7 @@
 #include <linux/slab.h>
 #include <linux/of_platform.h>
 #include <linux/platform_data/s3c-hsotg.h>
+#include <linux/workqueue.h>
 
 #include <linux/usb/ch9.h>
 #include <linux/usb/gadget.h>
@@ -122,6 +123,49 @@ static u32 dwc2_hsotg_read_frameno(struct dwc2_hsotg *hsotg)
 	dsts >>= DSTS_SOFFN_SHIFT;
 
 	return dsts;
+}
+
+/* Poll DSTS.SOFFN. Host SOFs increment it every 1ms; unplug freezes it. */
+#define DWC2_SOF_WATCHDOG_MS 100
+
+static void dwc2_gadget_sof_watchdog_kick(struct dwc2_hsotg *hsotg)
+{
+	if (!hsotg->params.vbus_always_on)
+		return;
+
+	hsotg->sof_watchdog_frameno = dwc2_hsotg_read_frameno(hsotg);
+	mod_delayed_work(system_wq, &hsotg->sof_watchdog,
+			 msecs_to_jiffies(DWC2_SOF_WATCHDOG_MS));
+}
+
+static void dwc2_gadget_sof_watchdog(struct work_struct *work)
+{
+	struct dwc2_hsotg *hsotg = container_of(to_delayed_work(work),
+						struct dwc2_hsotg,
+						sof_watchdog);
+	unsigned long flags;
+	u32 frameno;
+
+	spin_lock_irqsave(&hsotg->lock, flags);
+	if (!hsotg->connected || !hsotg->params.vbus_always_on) {
+		spin_unlock_irqrestore(&hsotg->lock, flags);
+		return;
+	}
+
+	frameno = dwc2_hsotg_read_frameno(hsotg);
+	if (frameno == hsotg->sof_watchdog_frameno) {
+		dev_info(hsotg->dev,
+			 "SOF watchdog: frame stuck at %u, disconnect\n",
+			 frameno);
+		dwc2_hsotg_disconnect(hsotg);
+		spin_unlock_irqrestore(&hsotg->lock, flags);
+		return;
+	}
+
+	hsotg->sof_watchdog_frameno = frameno;
+	spin_unlock_irqrestore(&hsotg->lock, flags);
+	schedule_delayed_work(&hsotg->sof_watchdog,
+			      msecs_to_jiffies(DWC2_SOF_WATCHDOG_MS));
 }
 
 /**
@@ -1975,6 +2019,7 @@ static void dwc2_hsotg_process_control(struct dwc2_hsotg *hsotg,
 		switch (ctrl->bRequest) {
 		case USB_REQ_SET_ADDRESS:
 			hsotg->connected = 1;
+			dwc2_gadget_sof_watchdog_kick(hsotg);
 			dcfg = dwc2_readl(hsotg, DCFG);
 			dcfg &= ~DCFG_DEVADDR_MASK;
 			dcfg |= (le16_to_cpu(ctrl->wValue) <<
@@ -3357,6 +3402,7 @@ void dwc2_hsotg_disconnect(struct dwc2_hsotg *hsotg)
 
 	hsotg->connected = 0;
 	hsotg->test_mode = 0;
+	cancel_delayed_work(&hsotg->sof_watchdog);
 
 	/* all endpoints should be shutdown */
 	for (ep = 0; ep < hsotg->num_of_eps; ep++) {
@@ -5048,6 +5094,7 @@ int dwc2_gadget_init(struct dwc2_hsotg *hsotg)
 	hsotg->gadget.name = dev_name(dev);
 	hsotg->gadget.otg_caps = &hsotg->params.otg_caps;
 	hsotg->remote_wakeup_allowed = 0;
+	INIT_DELAYED_WORK(&hsotg->sof_watchdog, dwc2_gadget_sof_watchdog);
 
 	if (hsotg->params.lpm)
 		hsotg->gadget.lpm_capable = true;
@@ -5129,6 +5176,7 @@ int dwc2_gadget_init(struct dwc2_hsotg *hsotg)
  */
 int dwc2_hsotg_remove(struct dwc2_hsotg *hsotg)
 {
+	cancel_delayed_work_sync(&hsotg->sof_watchdog);
 	usb_del_gadget_udc(&hsotg->gadget);
 	dwc2_hsotg_ep_free_request(&hsotg->eps_out[0]->ep, hsotg->ctrl_req);
 

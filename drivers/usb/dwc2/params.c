@@ -512,6 +512,9 @@ static void dwc2_get_device_properties(struct dwc2_hsotg *hsotg)
 
 	if (of_find_property(hsotg->dev->of_node, "disable-over-current", NULL))
 		p->oc_disable = true;
+
+	p->vbus_always_on = device_property_read_bool(hsotg->dev,
+						      "snps,vbus-always-on");
 }
 
 static void dwc2_check_param_otg_cap(struct dwc2_hsotg *hsotg)
